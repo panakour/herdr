@@ -240,11 +240,11 @@ fn build_server_daemon_command(exe: PathBuf, startup_cwd: Option<&Path>) -> Comm
         .stderr(std::process::Stdio::null());
     crate::platform::detach_server_daemon_command(&mut command);
 
-    match startup_cwd
-        .map(Path::to_path_buf)
-        .ok_or(())
-        .or_else(|()| std::env::current_dir().map_err(drop))
-    {
+    let startup_cwd = match startup_cwd {
+        Some(cwd) => Ok(cwd.to_path_buf()),
+        None => std::env::current_dir(),
+    };
+    match startup_cwd {
         Ok(cwd) => {
             command.env(STARTUP_CWD_ENV_VAR, cwd);
         }

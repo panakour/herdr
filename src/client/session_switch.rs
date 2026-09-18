@@ -78,10 +78,12 @@ pub(super) fn begin_local_session_switch(
     endpoints.disconnect(endpoint_id);
     supervisors.add_local(socket_path, None, now);
     if let Some(shell) = state.shell.as_mut() {
-        shell.set_local_endpoint_label(match target {
-            Some(_) => label.clone(),
-            None => "Local".into(),
-        });
+        let endpoint_label = if target.is_some() {
+            label.clone()
+        } else {
+            "Local".into()
+        };
+        shell.set_local_endpoint_label(endpoint_label);
         shell.set_endpoint_status(endpoint_id, endpoint::ClientEndpointStatus::Connecting);
     }
     Ok(label)

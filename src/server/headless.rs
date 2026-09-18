@@ -47,10 +47,8 @@ use crate::protocol::{
     self, AttachScrollDirection, AttachScrollSource, FrameData, ServerMessage, MAX_FRAME_SIZE,
 };
 #[cfg(unix)]
-#[cfg(unix)]
-use crate::server::client_accept::ClientAcceptWaker;
 use crate::server::client_accept::{
-    accept_pending_client_connections, reject_pending_client_connections,
+    accept_pending_client_connections, reject_pending_client_connections, ClientAcceptWaker,
 };
 use crate::server::client_shell::{
     render_pane_surface as render_client_shell_pane_surface, snapshot as client_shell_snapshot,
