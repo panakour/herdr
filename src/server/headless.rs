@@ -27,7 +27,7 @@ use interprocess::local_socket::traits::Stream as _;
 #[cfg(unix)]
 use interprocess::local_socket::ListenerNonblockingMode;
 use ratatui::layout::Rect;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Notify};
 #[cfg(windows)]
 use tracing::error;
 use tracing::{debug, info, warn};
@@ -47,6 +47,8 @@ use crate::protocol::{
     self, AttachScrollDirection, AttachScrollSource, FrameData, ServerMessage, MAX_FRAME_SIZE,
 };
 #[cfg(unix)]
+#[cfg(unix)]
+use crate::server::client_accept::ClientAcceptWaker;
 use crate::server::client_accept::{
     accept_pending_client_connections, reject_pending_client_connections,
 };
@@ -164,13 +166,12 @@ fn record_render_impact(source: &'static str, impact: RenderImpact) {
 #[allow(dead_code)]
 const SHUTDOWN_API_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// How often the idle headless loop wakes to poll the local listener for new
-/// client connections.
+/// Fallback cadence for polling the local listener for new client connections.
 ///
-/// The listener is non-blocking and not integrated into `tokio::select!`, so
-/// a low-frequency wake is required to notice new thin-client attaches while
-/// otherwise idle. Keep this much slower than the old resize-poll cadence to
-/// avoid reintroducing the idle CPU spin.
+/// The listener is non-blocking and not integrated into `tokio::select!`. On
+/// Unix a readiness watcher wakes the loop as soon as a connection is pending,
+/// so this only guards against a missed wake. Keep it much slower than the old
+/// resize-poll cadence to avoid reintroducing the idle CPU spin.
 const CLIENT_ACCEPT_POLL_INTERVAL: Duration = Duration::from_millis(250);
 
 // ---------------------------------------------------------------------------
@@ -201,6 +202,10 @@ pub struct HeadlessServer {
     api_server: Option<api::ServerHandle>,
     #[cfg(unix)]
     client_listener: LocalListener,
+    /// Fired when a client connection is waiting on the listener.
+    client_accept_notify: Arc<Notify>,
+    #[cfg(unix)]
+    client_accept_waker: ClientAcceptWaker,
     client_socket_path: PathBuf,
     client_socket_identity: SocketFileIdentity,
     clients: HashMap<u64, ClientConnection>,
@@ -326,6 +331,11 @@ impl HeadlessServer {
         // Set non-blocking on Unix so we can poll it from the event loop.
         #[cfg(unix)]
         listener.set_nonblocking(ListenerNonblockingMode::Accept)?;
+        let client_accept_notify = Arc::new(Notify::new());
+        #[cfg(unix)]
+        let client_accept_waker = ClientAcceptWaker::spawn(client_accept_notify.clone());
+        #[cfg(unix)]
+        client_accept_waker.rearm(&listener);
 
         // Channel for server events from client threads.
         let (server_event_tx, server_event_rx) = mpsc::channel(64);
@@ -345,6 +355,9 @@ impl HeadlessServer {
             api_server,
             #[cfg(unix)]
             client_listener: listener,
+            client_accept_notify,
+            #[cfg(unix)]
+            client_accept_waker,
             client_socket_path: client_path,
             client_socket_identity,
             clients: HashMap::new(),
@@ -634,6 +647,7 @@ impl HeadlessServer {
                         None => LoopEvent::Timer,
                     },
                     _ = sleep_until_or_pending(next_deadline) => LoopEvent::Timer,
+                    _ = self.client_accept_notify.notified() => LoopEvent::Timer,
                     _ = self.app.render_notify.notified() => LoopEvent::RenderRequested,
                 }
             };
@@ -1093,15 +1107,18 @@ impl HeadlessServer {
     /// Accepts pending client connections from the non-blocking listener.
     #[cfg(unix)]
     fn accept_client_connections(&mut self) -> io::Result<()> {
-        if self.handoff_in_progress {
-            return reject_pending_client_connections(&self.client_listener);
-        }
-        accept_pending_client_connections(
-            &self.client_listener,
-            &mut self.next_client_id,
-            &self.should_quit,
-            &self.server_event_tx,
-        )
+        let result = if self.handoff_in_progress {
+            reject_pending_client_connections(&self.client_listener)
+        } else {
+            accept_pending_client_connections(
+                &self.client_listener,
+                &mut self.next_client_id,
+                &self.should_quit,
+                &self.server_event_tx,
+            )
+        };
+        self.client_accept_waker.rearm(&self.client_listener);
+        result
     }
 
     /// Windows named-pipe clients can block in connect unless the server has a
