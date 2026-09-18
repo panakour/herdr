@@ -1004,6 +1004,17 @@ impl App {
                     },
                 );
             }
+            Method::ClientSessionSwitch(params) => {
+                return responses::encode_success(
+                    request.id,
+                    ResponseResult::ClientSessionSwitch {
+                        switched: false,
+                        reason: crate::api::schema::ClientSessionSwitchReason::NoForegroundClient,
+                        client_id: None,
+                        session: params.session,
+                    },
+                );
+            }
             Method::SessionSnapshot(_) => return self.handle_session_snapshot(request.id),
             Method::WorkspaceList(_) => return self.handle_workspace_list(request.id),
             Method::WorkspaceGet(target) => return self.handle_workspace_get(request.id, target),

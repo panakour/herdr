@@ -28,6 +28,7 @@ mod handshake;
 mod input;
 mod loop_config;
 mod notifications;
+mod session_switch;
 mod shell;
 mod shell_runtime;
 mod startup;
@@ -1905,6 +1906,41 @@ async fn run_client_loop(
                             }
                             Ok(endpoint::EndpointControlMessage::Ignored) => {
                                 debug!(%kind, "ignoring unknown endpoint control message");
+                                continue;
+                            }
+                            Ok(endpoint::EndpointControlMessage::SessionSwitch(session)) => {
+                                match session_switch::begin_local_session_switch(
+                                    &mut state,
+                                    &mut write_stream,
+                                    &mut endpoint_commands,
+                                    &mut supervisors,
+                                    &mut pending_activation,
+                                    &endpoint_id,
+                                    generation,
+                                    &session,
+                                    now,
+                                ) {
+                                    Ok(label) => {
+                                        info!(session = %label, "switching to another session");
+                                        // Local recovery stays enabled so the new session's
+                                        // server can be reached like a replaced Local server.
+                                        federated = true;
+                                        scheduled_activation = None;
+                                        clear_endpoint_host_effects(
+                                            &mut state,
+                                            &host_mouse_capture_active,
+                                            &host_sgr_pixels_active,
+                                        );
+                                    }
+                                    Err(message) => {
+                                        warn!(%message, %session, "ignoring session switch request");
+                                        if let Some(shell) = state.shell.as_mut() {
+                                            shell.receive_endpoint_unavailable(format!(
+                                                "cannot switch to session {session}: {message}"
+                                            ));
+                                        }
+                                    }
+                                }
                                 continue;
                             }
                             Ok(endpoint::EndpointControlMessage::Snapshot(snapshot)) => snapshot,

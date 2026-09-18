@@ -749,6 +749,14 @@ fn session_command() -> Command {
                 .arg(required("name", "NAME"))
                 .arg(json_flag()),
         )
+        .subcommand(
+            Command::new("switch")
+                .about("Move an attached client to another session")
+                .arg(required("name", "NAME"))
+                .arg(option("client", "ID").help(
+                    "Attached client id (default: HERDR_CLIENT_ID or the foreground client)",
+                )),
+        )
 }
 
 fn integration_command() -> Command {

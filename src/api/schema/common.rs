@@ -61,6 +61,15 @@ pub struct ClientWindowTitleSetParams {
     pub title: String,
 }
 
+/// Asks one attached client to reattach to another local session in place.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ClientSessionSwitchParams {
+    pub session: String,
+    /// Attached client to move. Defaults to the current foreground client.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<u64>,
+}
+
 /// Updates whether the requesting client shell receives and controls pane presentation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ClientShellSurfaceSetParams {
@@ -143,6 +152,13 @@ pub enum NotificationShowReason {
 pub enum ClientWindowTitleReason {
     Set,
     Cleared,
+    NoForegroundClient,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ClientSessionSwitchReason {
+    Requested,
     NoForegroundClient,
 }
 

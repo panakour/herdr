@@ -373,6 +373,47 @@ fn client_window_title_requests_round_trip() {
 }
 
 #[test]
+fn client_session_switch_request_and_response_round_trip() {
+    let request = Request {
+        id: "req_switch".into(),
+        method: Method::ClientSessionSwitch(ClientSessionSwitchParams {
+            session: "work".into(),
+            client_id: Some(3),
+        }),
+    };
+    let json = serde_json::to_value(&request).unwrap();
+    assert_eq!(json["method"], "client.session.switch");
+    assert_eq!(json["params"]["session"], "work");
+    assert_eq!(json["params"]["client_id"], 3);
+    let parsed: Request = serde_json::from_value(json).unwrap();
+    assert_eq!(parsed, request);
+
+    let parsed: Request = serde_json::from_str(
+        r#"{"id":"req_switch","method":"client.session.switch","params":{"session":"work"}}"#,
+    )
+    .unwrap();
+    let Method::ClientSessionSwitch(params) = parsed.method else {
+        panic!("expected client.session.switch");
+    };
+    assert_eq!(params.client_id, None);
+
+    let response = SuccessResponse {
+        id: "req_switch".into(),
+        result: ResponseResult::ClientSessionSwitch {
+            switched: true,
+            reason: ClientSessionSwitchReason::Requested,
+            client_id: Some(3),
+            session: "work".into(),
+        },
+    };
+    let json = serde_json::to_value(&response).unwrap();
+    assert_eq!(json["result"]["type"], "client_session_switch");
+    assert_eq!(json["result"]["reason"], "requested");
+    let parsed: SuccessResponse = serde_json::from_value(json).unwrap();
+    assert_eq!(parsed, response);
+}
+
+#[test]
 fn agent_view_requests_round_trip() {
     let set_json = serde_json::json!({
         "id": "view-set",

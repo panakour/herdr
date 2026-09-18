@@ -392,6 +392,9 @@ pub struct PluginInvocationContext {
     pub clicked_url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub link_handler_id: Option<String>,
+    /// Attached client that invoked the action through a keybinding.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

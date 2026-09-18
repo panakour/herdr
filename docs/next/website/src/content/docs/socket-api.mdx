@@ -98,7 +98,7 @@ Raw socket method names use dot notation:
 | --- | --- |
 | Server | `ping`, `server.stop`, `server.reload_config`, `server.agent_manifests`, `server.reload_agent_manifests` |
 | Notification | `notification.show` |
-| Client | `client.window_title.set`, `client.window_title.clear` |
+| Client | `client.window_title.set`, `client.window_title.clear`, `client.session.switch` |
 | Session | `session.snapshot` |
 | Workspace | `workspace.create`, `workspace.list`, `workspace.get`, `workspace.focus`, `workspace.rename`, `workspace.move`, `workspace.move_block`, `workspace.report_metadata`, `workspace.close` |
 | Worktree | `worktree.list`, `worktree.create`, `worktree.open`, `worktree.remove` |
@@ -388,6 +388,24 @@ Set or clear the foreground client's outer terminal window title:
 `client.window_title.clear` hands the title back to `ui.window_title`. The response is
 `type: "client_window_title"` with `changed` and reason `set`, `cleared`, or
 `no_foreground_client`.
+
+Move one attached client to another local named session in the same terminal:
+
+```json
+{"id":"req_switch","method":"client.session.switch","params":{"session":"work","client_id":3}}
+```
+
+`client_id` is optional and defaults to the current foreground client. Custom
+commands and plugin actions started from a keybinding receive the invoking
+client's id as `HERDR_CLIENT_ID`. The server only asks; the client detaches,
+starts the target session's server when it is not running, reconnects, and
+keeps every other attached client where it is. The response is
+`type: "client_session_switch"` with `switched`, `session`, `client_id`, and
+reason `requested` or `no_foreground_client`. Requests for the current session
+fail with `same_session`; unknown, detached, or direct terminal clients fail
+with `client_not_found` or `client_not_switchable`. Clients from before this
+release ignore the request. Remote clients connected with `herdr --remote`
+cannot switch sessions.
 
 Worktree methods manage Git checkouts as Herdr workspaces. `worktree.create` creates a checkout and returns the new `workspace`, `tab`, `root_pane`, and `worktree` records. If the requested branch already exists locally, it checks out that branch; otherwise it creates the branch from the requested base or `HEAD`. `worktree.open` opens an existing checkout or returns the already-open workspace. `worktree.remove` runs `git worktree remove` against a linked child workspace and never deletes the branch.
 

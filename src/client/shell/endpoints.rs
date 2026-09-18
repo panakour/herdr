@@ -98,6 +98,16 @@ impl ClientShellState {
         self.endpoints = next;
     }
 
+    pub(crate) fn set_local_endpoint_label(&mut self, label: String) {
+        if let Some(endpoint) = self
+            .endpoints
+            .iter_mut()
+            .find(|endpoint| endpoint.endpoint_id.is_local())
+        {
+            endpoint.label = label;
+        }
+    }
+
     pub(crate) fn select_unavailable_local(&mut self) {
         self.reset_endpoint_projection();
         self.active_endpoint_id = ClientEndpointId::Local;

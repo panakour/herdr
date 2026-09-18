@@ -157,6 +157,8 @@ pub struct App {
     pub(crate) full_redraw_pending: bool,
     pub(crate) overlay_panes: HashMap<crate::layout::PaneId, OverlayPaneState>,
     pub(crate) config_reloaded_from_disk: bool,
+    /// Attached client whose shell request is being dispatched, if any.
+    pub(crate) request_client_id: Option<u64>,
     client_shell_keybindings_profile: Option<String>,
     endpoint_commands: custom_commands::EndpointCommandRegistry,
 }
@@ -622,6 +624,7 @@ impl App {
             full_redraw_pending: false,
             overlay_panes: HashMap::new(),
             config_reloaded_from_disk: false,
+            request_client_id: None,
             client_shell_keybindings_profile,
             endpoint_commands,
         };

@@ -345,6 +345,121 @@ fn no_window_title(control_rx: &std::sync::mpsc::Receiver<Vec<u8>>) -> bool {
     true
 }
 
+fn client_session_switch(
+    server: &mut HeadlessServer,
+    session: &str,
+    client_id: Option<u64>,
+) -> serde_json::Value {
+    let (respond_to, response_rx) = std::sync::mpsc::channel();
+    server.handle_api_request_with_shutdown_check(api::ApiRequestMessage {
+        request: api::schema::Request {
+            id: "switch".into(),
+            method: api::schema::Method::ClientSessionSwitch(
+                api::schema::ClientSessionSwitchParams {
+                    session: session.into(),
+                    client_id,
+                },
+            ),
+        },
+        respond_to,
+        response_write_complete: None,
+        stream_active: None,
+    });
+    serde_json::from_str(&response_rx.recv().unwrap()).unwrap()
+}
+
+fn next_session_switch(control_rx: &std::sync::mpsc::Receiver<Vec<u8>>) -> Option<String> {
+    next_session_switch_within(control_rx, Duration::from_secs(5))
+}
+
+fn no_session_switch(control_rx: &std::sync::mpsc::Receiver<Vec<u8>>) -> bool {
+    next_session_switch_within(control_rx, Duration::from_millis(200)).is_none()
+}
+
+fn next_session_switch_within(
+    control_rx: &std::sync::mpsc::Receiver<Vec<u8>>,
+    timeout: Duration,
+) -> Option<String> {
+    let deadline = Instant::now() + timeout;
+    while let Some(remaining) = deadline.checked_duration_since(Instant::now()) {
+        let Ok(bytes) = control_rx.recv_timeout(remaining) else {
+            return None;
+        };
+        if let ServerMessage::EndpointControl { kind, data } = read_server_message(bytes) {
+            if kind == crate::protocol::endpoint::CLIENT_SESSION_SWITCH_KIND {
+                let request: crate::protocol::endpoint::EndpointClientSessionSwitch =
+                    serde_json::from_str(&data).unwrap();
+                return Some(request.session);
+            }
+        }
+    }
+    None
+}
+
+#[test]
+fn client_session_switch_targets_one_shell_client() {
+    let (mut server, first_control_rx) = window_title_test_server();
+    let (client_tx, second_control_rx, _render_rx) = test_client_writer();
+    server.clients.insert(
+        2,
+        ClientConnection::new(
+            (80, 24),
+            crate::kitty_graphics::HostCellSize::default(),
+            2,
+            RenderEncoding::SemanticFrame,
+            Some(client_tx),
+        ),
+    );
+
+    // An explicit client id moves only that client.
+    let response = client_session_switch(&mut server, "work", Some(2));
+    assert_eq!(response["result"]["type"], "client_session_switch");
+    assert_eq!(response["result"]["switched"], true);
+    assert_eq!(response["result"]["reason"], "requested");
+    assert_eq!(response["result"]["client_id"], 2);
+    assert_eq!(response["result"]["session"], "work");
+    assert_eq!(
+        next_session_switch(&second_control_rx).as_deref(),
+        Some("work")
+    );
+    assert!(no_session_switch(&first_control_rx));
+
+    // Without a client id the foreground client is used.
+    let response = client_session_switch(&mut server, "side", None);
+    assert_eq!(response["result"]["client_id"], 1);
+    assert_eq!(
+        next_session_switch(&first_control_rx).as_deref(),
+        Some("side")
+    );
+
+    // Unknown clients and the current session are rejected.
+    let response = client_session_switch(&mut server, "work", Some(99));
+    assert_eq!(response["error"]["code"], "client_not_found");
+    let current = crate::session::display_name(crate::session::active_name().as_deref()).to_owned();
+    let response = client_session_switch(&mut server, &current, Some(2));
+    assert_eq!(response["error"]["code"], "same_session");
+    let response = client_session_switch(&mut server, "bad/name", Some(2));
+    assert_eq!(response["error"]["code"], "invalid_params");
+
+    // Direct terminal attaches are not Herdr shells.
+    server.clients.get_mut(&2).unwrap().mode = ClientConnectionMode::TerminalAttach {
+        terminal_id: "t1".into(),
+    };
+    let response = client_session_switch(&mut server, "work", Some(2));
+    assert_eq!(response["error"]["code"], "client_not_switchable");
+
+    shutdown_test_runtimes(&mut server);
+}
+
+#[test]
+fn client_session_switch_without_clients_reports_no_foreground_client() {
+    let mut server = test_headless_server();
+    let response = client_session_switch(&mut server, "work", None);
+    assert_eq!(response["result"]["switched"], false);
+    assert_eq!(response["result"]["reason"], "no_foreground_client");
+    shutdown_test_runtimes(&mut server);
+}
+
 #[test]
 fn window_title_waits_for_a_foreground_client_to_exist() {
     let mut server = test_headless_server();

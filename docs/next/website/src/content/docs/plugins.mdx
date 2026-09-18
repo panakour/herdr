@@ -255,7 +255,8 @@ injects `HERDR_SOCKET_PATH`, `HERDR_BIN_PATH`, `HERDR_ENV=1`,
 `HERDR_PLUGIN_ID`, `HERDR_PLUGIN_ROOT`, `HERDR_PLUGIN_CONFIG_DIR`,
 `HERDR_PLUGIN_STATE_DIR`, `HERDR_PLUGIN_CONTEXT_JSON`, and any available
 `HERDR_WORKSPACE_ID`, `HERDR_TAB_ID`, and `HERDR_PANE_ID`. Action commands also
-receive `HERDR_PLUGIN_ACTION_ID`; startup and event hooks receive
+receive `HERDR_PLUGIN_ACTION_ID`, and actions started from a keybinding receive
+the invoking client's `HERDR_CLIENT_ID`; startup and event hooks receive
 `HERDR_PLUGIN_EVENT` (`startup` for startup hooks), event hooks additionally
 receive `HERDR_PLUGIN_EVENT_JSON`, and pane commands receive
 `HERDR_PLUGIN_ENTRYPOINT_ID`.
@@ -270,8 +271,8 @@ but it does not validate, sync, or delete their contents. The plugin owns the
 file format and lifecycle.
 
 `HERDR_PLUGIN_CONTEXT_JSON` can include workspace, tab, focused pane, worktree,
-agent, selected text, clicked URL, and link handler fields when they are
-available for that invocation. Shell plugins can read the individual env vars
+agent, selected text, clicked URL, link handler, and `client_id` fields when
+they are available for that invocation. Shell plugins can read the individual env vars
 for common ids, or parse the context JSON for the full shape.
 
 Use `HERDR_BIN_PATH` when a plugin needs to call Herdr portably from Node,

@@ -45,6 +45,15 @@ pub fn is_server_listening() -> bool {
     is_server_listening_at(&client_socket_path())
 }
 
+/// Starts a background server for `socket_path` when nothing is listening there.
+/// Returns whether a daemon was spawned; readiness is left to the caller.
+pub fn spawn_server_daemon_if_needed(socket_path: &Path) -> io::Result<bool> {
+    if is_server_listening_at(socket_path) {
+        return Ok(false);
+    }
+    spawn_server_daemon().map(|_| true)
+}
+
 /// Checks whether a herdr server is listening at a specific socket path.
 fn is_server_listening_at(socket_path: &Path) -> bool {
     #[cfg(windows)]

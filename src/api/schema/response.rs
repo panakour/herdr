@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::agents::AgentInfo;
-use super::common::{ClientWindowTitleReason, NotificationShowReason};
+use super::common::{ClientSessionSwitchReason, ClientWindowTitleReason, NotificationShowReason};
 use super::events::EventEnvelope;
 use super::integrations::{
     IntegrationInstallResult, IntegrationTarget, IntegrationUninstallResult,
@@ -228,6 +228,13 @@ pub enum ResponseResult {
     ClientWindowTitle {
         changed: bool,
         reason: ClientWindowTitleReason,
+    },
+    ClientSessionSwitch {
+        switched: bool,
+        reason: ClientSessionSwitchReason,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        client_id: Option<u64>,
+        session: String,
     },
     IntegrationList {
         integrations: Vec<super::integrations::IntegrationInfo>,

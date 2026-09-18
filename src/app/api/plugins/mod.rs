@@ -243,6 +243,7 @@ impl App {
         let mut context = self.current_plugin_context("keybinding");
         context.invocation_source = Some("keybinding".to_string());
         context.selected_text = selected_text;
+        context.client_id = self.request_client_id;
         self.start_plugin_command(
             &plugin,
             Some(action.action_id),
@@ -2466,6 +2467,7 @@ command = ["sh", "-c", "printf %s ${{HERDR_PANE_ID-unset}} > '{}'; sleep 1"]
                     correlation_id: Some("external-correlation".into()),
                     clicked_url: None,
                     link_handler_id: None,
+                    client_id: None,
                 }),
             }),
         });

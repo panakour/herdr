@@ -288,6 +288,18 @@ impl EndpointRegistry {
         }
     }
 
+    /// Waits until frames queued for `endpoint_id` before this call reach the socket.
+    pub(crate) fn flush_to(
+        &mut self,
+        endpoint_id: &ClientEndpointId,
+        deadline: Instant,
+    ) -> io::Result<()> {
+        let connection = self.connections.get_mut(endpoint_id).ok_or_else(|| {
+            io::Error::new(io::ErrorKind::NotConnected, "endpoint is unavailable")
+        })?;
+        connection.transport.flush(deadline)
+    }
+
     pub(crate) fn disconnect(&mut self, endpoint_id: &ClientEndpointId) {
         self.failures
             .retain(|failure| &failure.endpoint_id != endpoint_id);

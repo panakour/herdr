@@ -252,6 +252,9 @@ impl App {
                 current_exe.display().to_string(),
             ));
         }
+        if let Some(client_id) = self.request_client_id {
+            env.push(("HERDR_CLIENT_ID".to_string(), client_id.to_string()));
+        }
 
         let mut cwd = None;
         if let Some(ws_idx) = self.state.active {
@@ -595,6 +598,22 @@ mod tests {
 
     fn install(app: &mut crate::app::App, binding: crate::config::CustomCommandKeybind) {
         app.endpoint_commands = super::EndpointCommandRegistry::new(&[binding]);
+    }
+
+    #[test]
+    fn custom_command_env_names_the_invoking_client_only_when_known() {
+        let mut app = test_app();
+        let (env, _) = app.custom_command_env();
+        assert!(env.iter().all(|(key, _)| key != "HERDR_CLIENT_ID"));
+
+        app.request_client_id = Some(7);
+        let (env, _) = app.custom_command_env();
+        assert_eq!(
+            env.iter()
+                .find(|(key, _)| key == "HERDR_CLIENT_ID")
+                .map(|(_, value)| value.as_str()),
+            Some("7")
+        );
     }
 
     #[test]

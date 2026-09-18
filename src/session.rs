@@ -229,6 +229,21 @@ pub fn parse_target_name(name: &str) -> Result<Option<String>, String> {
     normalize_name(name)
 }
 
+/// Human-readable session name, spelling the default session as `default`.
+pub fn display_name(name: Option<&str>) -> &str {
+    name.unwrap_or(DEFAULT_SESSION_NAME)
+}
+
+/// Repoints this process at another local session. Later socket path lookups
+/// resolve to that session, and child servers inherit it through the environment.
+pub fn switch_active_session(name: &str) -> Result<Option<String>, String> {
+    let session = normalize_name(name)?;
+    std::env::remove_var(crate::api::SOCKET_PATH_ENV_VAR);
+    std::env::remove_var(crate::server::socket_paths::CLIENT_SOCKET_PATH_ENV_VAR);
+    apply_explicit_name(name)?;
+    Ok(session)
+}
+
 pub fn stop_session(name: Option<&str>) -> Result<SessionInfo, String> {
     stop_session_with_timeout(name, STOP_WAIT_TIMEOUT)
 }

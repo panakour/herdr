@@ -355,5 +355,6 @@ fn plugin_pane_protected_env_key(key: &str) -> bool {
             | "HERDR_PLUGIN_ENTRYPOINT_ID"
             | "HERDR_PLUGIN_CONTEXT_JSON"
             | "HERDR_BIN_PATH"
+            | "HERDR_CLIENT_ID"
     )
 }

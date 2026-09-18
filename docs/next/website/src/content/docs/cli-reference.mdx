@@ -145,9 +145,12 @@ herdr session list [--json]
 herdr session attach <name>
 herdr session stop <name> [--json]
 herdr session delete <name> [--json]
+herdr session switch <name> [--client <id>]
 ```
 
 Use `default` as the session name when you need to stop the default session explicitly.
+
+`session switch` moves one attached client to another named session in place, without detaching or starting a nested client. It calls `client.session.switch` on the current session's server. `--client` defaults to `HERDR_CLIENT_ID`, which custom commands and keybinding-invoked plugin actions receive, and otherwise to the foreground client. Other attached clients stay where they are, and the previous session keeps running. The target session's server starts when it is not running.
 
 ## Workspaces
 
@@ -540,5 +543,6 @@ These meanings apply to reads. For `pane wait-output` only, both `recent` and `r
 | `HERDR_PANE_ID` | Public pane id for the running pane process. |
 | `HERDR_TAB_ID` | Public tab id for the running pane process. |
 | `HERDR_WORKSPACE_ID` | Public workspace id for the running pane process. |
+| `HERDR_CLIENT_ID` | Attached client that invoked a custom command or plugin action through a keybinding. |
 | `HERDR_LOG` | Set log filter, for example `HERDR_LOG=herdr=debug`. |
 | `HERDR_DISABLE_SOUND` | Disable sound playback even when sound notifications are enabled. |

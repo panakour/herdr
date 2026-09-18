@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Added
+- Move one attached client to another named session in place with `herdr session switch <name>` or the `client.session.switch` socket method. Custom commands and keybinding-invoked plugin actions receive the pressing client's `HERDR_CLIENT_ID`, so a project picker can switch only its own terminal while other clients and the previous session keep running. (#4292)
+
 ## [0.9.1] - 2026-09-16
 
 ### Added
