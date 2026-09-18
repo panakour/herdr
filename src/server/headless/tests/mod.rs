@@ -358,6 +358,7 @@ fn client_session_switch(
                 api::schema::ClientSessionSwitchParams {
                     session: session.into(),
                     client_id,
+                    cwd: Some("/srv/project".into()),
                 },
             ),
         },
@@ -389,6 +390,7 @@ fn next_session_switch_within(
             if kind == crate::protocol::endpoint::CLIENT_SESSION_SWITCH_KIND {
                 let request: crate::protocol::endpoint::EndpointClientSessionSwitch =
                     serde_json::from_str(&data).unwrap();
+                assert_eq!(request.cwd.as_deref(), Some("/srv/project"));
                 return Some(request.session);
             }
         }

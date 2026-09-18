@@ -379,6 +379,7 @@ fn client_session_switch_request_and_response_round_trip() {
         method: Method::ClientSessionSwitch(ClientSessionSwitchParams {
             session: "work".into(),
             client_id: Some(3),
+            cwd: Some("/srv/work".into()),
         }),
     };
     let json = serde_json::to_value(&request).unwrap();
@@ -396,6 +397,7 @@ fn client_session_switch_request_and_response_round_trip() {
         panic!("expected client.session.switch");
     };
     assert_eq!(params.client_id, None);
+    assert_eq!(params.cwd, None);
 
     let response = SuccessResponse {
         id: "req_switch".into(),

@@ -1908,7 +1908,10 @@ async fn run_client_loop(
                                 debug!(%kind, "ignoring unknown endpoint control message");
                                 continue;
                             }
-                            Ok(endpoint::EndpointControlMessage::SessionSwitch(session)) => {
+                            Ok(endpoint::EndpointControlMessage::SessionSwitch {
+                                session,
+                                cwd,
+                            }) => {
                                 match session_switch::begin_local_session_switch(
                                     &mut state,
                                     &mut write_stream,
@@ -1918,6 +1921,7 @@ async fn run_client_loop(
                                     &endpoint_id,
                                     generation,
                                     &session,
+                                    cwd.as_deref(),
                                     now,
                                 ) {
                                     Ok(label) => {

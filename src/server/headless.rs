@@ -1683,8 +1683,10 @@ impl HeadlessServer {
             }
             Some(_) => {}
         }
-        let message = match crate::protocol::endpoint::client_session_switch_message(&session_name)
-        {
+        let message = match crate::protocol::endpoint::client_session_switch_message(
+            &session_name,
+            params.cwd.as_deref(),
+        ) {
             Ok(message) => message,
             Err(err) => return error(id, "internal_error", err.to_string()),
         };

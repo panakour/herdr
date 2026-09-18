@@ -145,12 +145,12 @@ herdr session list [--json]
 herdr session attach <name>
 herdr session stop <name> [--json]
 herdr session delete <name> [--json]
-herdr session switch <name> [--client <id>]
+herdr session switch <name> [--cwd <path>] [--client <id>]
 ```
 
 Use `default` as the session name when you need to stop the default session explicitly.
 
-`session switch` moves one attached client to another named session in place, without detaching or starting a nested client. It calls `client.session.switch` on the current session's server. `--client` defaults to `HERDR_CLIENT_ID`, which custom commands and keybinding-invoked plugin actions receive, and otherwise to the foreground client. Other attached clients stay where they are, and the previous session keeps running. The target session's server starts when it is not running.
+`session switch` moves one attached client to another named session in place, without detaching or starting a nested client. It calls `client.session.switch` on the current session's server. `--client` defaults to `HERDR_CLIENT_ID`, which custom commands and keybinding-invoked plugin actions receive, and otherwise to the foreground client. Other attached clients stay where they are, and the previous session keeps running. The target session's server starts when it is not running; `--cwd` then opens its first workspace in that directory, so a project picker can behave like `tmux new-session -A -c <dir>`.
 
 ## Workspaces
 

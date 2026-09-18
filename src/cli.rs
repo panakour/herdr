@@ -457,7 +457,8 @@ fn session_attach_help(args: &[String]) -> std::io::Result<i32> {
     Ok(2)
 }
 
-const SESSION_SWITCH_USAGE: &str = "usage: herdr session switch <name> [--client <id>]";
+const SESSION_SWITCH_USAGE: &str =
+    "usage: herdr session switch <name> [--cwd <path>] [--client <id>]";
 
 fn session_switch(args: &[String]) -> std::io::Result<i32> {
     let params = match parse_session_switch_args(args, std::env::var("HERDR_CLIENT_ID").ok()) {
@@ -490,6 +491,7 @@ fn parse_session_switch_args(
 ) -> Result<crate::api::schema::ClientSessionSwitchParams, SessionSwitchArgError> {
     let mut name = None;
     let mut client = None;
+    let mut cwd = None;
     let mut options_ended = false;
     let mut index = 0;
     while index < args.len() {
@@ -498,6 +500,24 @@ fn parse_session_switch_args(
             options_ended = true;
         } else if !options_ended && matches!(arg, "help" | "--help" | "-h") {
             return Err(SessionSwitchArgError::Usage);
+        } else if !options_ended && arg == "--cwd" {
+            let Some(value) = args.get(index + 1) else {
+                return Err(SessionSwitchArgError::Message(
+                    "missing value for --cwd".into(),
+                ));
+            };
+            let path = crate::worktree::expand_tilde_path(value);
+            let path = std::fs::canonicalize(&path).map_err(|error| {
+                SessionSwitchArgError::Message(format!("--cwd {}: {error}", path.display()))
+            })?;
+            if !path.is_dir() {
+                return Err(SessionSwitchArgError::Message(format!(
+                    "--cwd {} is not a directory",
+                    path.display()
+                )));
+            }
+            cwd = Some(path.display().to_string());
+            index += 1;
         } else if !options_ended && arg == "--client" {
             let Some(value) = args.get(index + 1) else {
                 return Err(SessionSwitchArgError::Message(
@@ -529,6 +549,7 @@ fn parse_session_switch_args(
     Ok(crate::api::schema::ClientSessionSwitchParams {
         session: name,
         client_id,
+        cwd,
     })
 }
 
@@ -1120,11 +1141,12 @@ fn print_session_help() {
     eprintln!("  herdr session attach <name>");
     eprintln!("  herdr session stop <name> [--json]");
     eprintln!("  herdr session delete <name> [--json]");
-    eprintln!("  herdr session switch <name> [--client <id>]");
+    eprintln!("  herdr session switch <name> [--cwd <path>] [--client <id>]");
     eprintln!("  use 'default' as <name> to target the default session for stop");
     eprintln!(
         "  switch moves the attached client (default: the invoking or foreground client) to <name>"
     );
+    eprintln!("  --cwd seeds the first workspace when switch has to start that session's server");
 }
 
 fn _print_json<T: Serialize>(value: &T) {
@@ -1154,6 +1176,16 @@ mod tests {
 
         let params = parse_session_switch_args(&args(&["--", "-dash"]), None).unwrap();
         assert_eq!(params.session, "-dash");
+        assert_eq!(params.cwd, None);
+
+        let dir = std::env::temp_dir();
+        let params =
+            parse_session_switch_args(&args(&["work", "--cwd", &dir.display().to_string()]), None)
+                .unwrap();
+        assert_eq!(
+            params.cwd.as_deref(),
+            Some(std::fs::canonicalize(&dir).unwrap().to_str().unwrap())
+        );
     }
 
     #[test]
@@ -1180,6 +1212,10 @@ mod tests {
         ));
         assert!(matches!(
             parse_session_switch_args(&args(&["bad/name"]), None),
+            Err(SessionSwitchArgError::Message(_))
+        ));
+        assert!(matches!(
+            parse_session_switch_args(&args(&["work", "--cwd", "/definitely/missing/dir"]), None),
             Err(SessionSwitchArgError::Message(_))
         ));
     }

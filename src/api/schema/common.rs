@@ -68,6 +68,10 @@ pub struct ClientSessionSwitchParams {
     /// Attached client to move. Defaults to the current foreground client.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_id: Option<u64>,
+    /// Directory for the first workspace when the target session's server is
+    /// started by this switch. Ignored when the session already has workspaces.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
 }
 
 /// Updates whether the requesting client shell receives and controls pane presentation.

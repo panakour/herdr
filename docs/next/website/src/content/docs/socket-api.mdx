@@ -392,14 +392,16 @@ Set or clear the foreground client's outer terminal window title:
 Move one attached client to another local named session in the same terminal:
 
 ```json
-{"id":"req_switch","method":"client.session.switch","params":{"session":"work","client_id":3}}
+{"id":"req_switch","method":"client.session.switch","params":{"session":"work","client_id":3,"cwd":"/srv/work"}}
 ```
 
 `client_id` is optional and defaults to the current foreground client. Custom
 commands and plugin actions started from a keybinding receive the invoking
 client's id as `HERDR_CLIENT_ID`. The server only asks; the client detaches,
 starts the target session's server when it is not running, reconnects, and
-keeps every other attached client where it is. The response is
+keeps every other attached client where it is. The optional `cwd` seeds the
+first workspace of a server started by this switch and is ignored when the
+session already has workspaces. The response is
 `type: "client_session_switch"` with `switched`, `session`, `client_id`, and
 reason `requested` or `no_foreground_client`. Requests for the current session
 fail with `same_session`; unknown, detached, or direct terminal clients fail

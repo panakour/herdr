@@ -1,6 +1,9 @@
 use super::*;
 
 const DETACH_FLUSH_TIMEOUT: Duration = Duration::from_millis(250);
+/// A fresh server accepts clients within tens of milliseconds. Waiting here keeps
+/// the first reconnect attempt from missing it and falling into retry backoff.
+const STARTED_SERVER_READY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Moves this client-owned shell from the current Local session to `session`.
 ///
@@ -17,6 +20,7 @@ pub(super) fn begin_local_session_switch(
     endpoint_id: &endpoint::ClientEndpointId,
     generation: u64,
     session: &str,
+    startup_cwd: Option<&str>,
     now: std::time::Instant,
 ) -> Result<String, String> {
     if !endpoint_id.is_local() {
@@ -31,8 +35,22 @@ pub(super) fn begin_local_session_switch(
     let target = crate::session::switch_active_session(session)?;
     let label = crate::session::display_name(target.as_deref()).to_owned();
     let socket_path = client_socket_path();
-    match crate::server::autodetect::spawn_server_daemon_if_needed(&socket_path) {
-        Ok(true) => info!(session = %label, "started server for requested session"),
+    let startup_cwd = startup_cwd
+        .map(crate::worktree::expand_tilde_path)
+        .filter(|path| path.is_dir());
+    match crate::server::autodetect::spawn_server_daemon_if_needed(
+        &socket_path,
+        startup_cwd.as_deref(),
+    ) {
+        Ok(true) => {
+            info!(session = %label, "started server for requested session");
+            if let Err(error) = crate::server::autodetect::wait_for_server_socket(
+                &socket_path,
+                STARTED_SERVER_READY_TIMEOUT,
+            ) {
+                warn!(%error, session = %label, "started server is not ready yet; reconnecting");
+            }
+        }
         Ok(false) => {}
         Err(error) => {
             warn!(%error, session = %label, "failed to start server for requested session")

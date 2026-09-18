@@ -373,7 +373,8 @@ fn switching_to_a_stopped_session_starts_its_server() {
     // The CLI targets the server behind HERDR_SOCKET_PATH, as a custom command
     // would, and without HERDR_CLIENT_ID it moves the foreground client.
     let output_cli = std::process::Command::new(env!("CARGO_BIN_EXE_herdr"))
-        .args(["session", "switch", "side"])
+        .args(["session", "switch", "side", "--cwd"])
+        .arg(&sessions.base)
         .env("XDG_CONFIG_HOME", &sessions.config_home)
         .env("XDG_STATE_HOME", sessions.runtime_dir.join("state"))
         .env("XDG_RUNTIME_DIR", &sessions.runtime_dir)
@@ -403,6 +404,19 @@ fn switching_to_a_stopped_session_starts_its_server() {
             !has_foreground_client(&default_api)
         }),
         "the default session must lose its only client"
+    );
+    // The server started by the switch seeded its first workspace from --cwd.
+    let panes = send_json_request(
+        &side_api,
+        r#"{"id":"panes","method":"pane.list","params":{}}"#,
+    );
+    let expected_cwd = fs::canonicalize(&sessions.base).unwrap();
+    assert_eq!(
+        panes["result"]["panes"][0]["cwd"]
+            .as_str()
+            .map(PathBuf::from),
+        Some(expected_cwd),
+        "{panes}"
     );
     sessions.seed_marker(Some("side"), "SIDE_SESSION_FRAME");
     wait_for_screen(

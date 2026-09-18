@@ -1701,6 +1701,13 @@
                 "null"
               ]
             },
+            "cwd": {
+              "description": "Directory for the first workspace when the target session's server is\nstarted by this switch. Ignored when the session already has workspaces.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "session": {
               "type": "string"
             }

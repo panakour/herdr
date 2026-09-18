@@ -753,6 +753,11 @@ fn session_command() -> Command {
             Command::new("switch")
                 .about("Move an attached client to another session")
                 .arg(required("name", "NAME"))
+                .arg(
+                    path_option("cwd", "PATH").help(
+                        "Directory for the first workspace when the session's server is started",
+                    ),
+                )
                 .arg(option("client", "ID").help(
                     "Attached client id (default: HERDR_CLIENT_ID or the foreground client)",
                 )),

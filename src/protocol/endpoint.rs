@@ -100,13 +100,20 @@ pub struct EndpointServerWelcome {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EndpointClientSessionSwitch {
     pub session: String,
+    /// Startup directory for a server the client has to start for `session`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
 }
 
-pub fn client_session_switch_message(session: &str) -> serde_json::Result<ServerMessage> {
+pub fn client_session_switch_message(
+    session: &str,
+    cwd: Option<&str>,
+) -> serde_json::Result<ServerMessage> {
     Ok(ServerMessage::EndpointControl {
         kind: CLIENT_SESSION_SWITCH_KIND.into(),
         data: serde_json::to_string(&EndpointClientSessionSwitch {
             session: session.to_owned(),
+            cwd: cwd.map(str::to_owned),
         })?,
     })
 }
