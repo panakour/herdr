@@ -1616,6 +1616,100 @@ impl HeadlessServer {
         .unwrap_or_else(|_| "{}".to_string())
     }
 
+    /// Asks one client-owned shell to reattach to another local session. The
+    /// server only names the target; the client owns the reconnect.
+    fn handle_client_session_switch_api(
+        &mut self,
+        id: String,
+        params: api::schema::ClientSessionSwitchParams,
+    ) -> String {
+        use api::schema::{ClientSessionSwitchReason, ResponseResult};
+
+        let error = |id: String, code: &str, message: String| {
+            serde_json::to_string(&api::schema::ErrorResponse {
+                id,
+                error: api::schema::ErrorBody {
+                    code: code.into(),
+                    message,
+                },
+            })
+            .unwrap_or_else(|_| "{}".to_string())
+        };
+        let session = match crate::session::parse_target_name(&params.session) {
+            Ok(session) => session,
+            Err(message) => return error(id, "invalid_params", message),
+        };
+        let session_name = crate::session::display_name(session.as_deref()).to_owned();
+        if session == crate::session::active_name() {
+            return error(
+                id,
+                "same_session",
+                format!("client is already attached to session {session_name}"),
+            );
+        }
+        let Some(client_id) = params.client_id.or(self.foreground_client_id) else {
+            return serde_json::to_string(&api::schema::SuccessResponse {
+                id,
+                result: ResponseResult::ClientSessionSwitch {
+                    accepted: false,
+                    reason: ClientSessionSwitchReason::NoForegroundClient,
+                    client_id: None,
+                    session: session_name,
+                },
+            })
+            .unwrap_or_else(|_| "{}".to_string());
+        };
+        match self.clients.get(&client_id) {
+            None => {
+                return error(
+                    id,
+                    "client_not_found",
+                    format!("no attached client has id {client_id}"),
+                );
+            }
+            Some(client) if client.mode != ClientConnectionMode::ClientShell => {
+                return error(
+                    id,
+                    "client_not_switchable",
+                    format!("client {client_id} is a direct terminal attach, not a Herdr shell"),
+                );
+            }
+            Some(client) if client.writer.is_none() => {
+                return error(
+                    id,
+                    "client_not_switchable",
+                    format!("client {client_id} is detached"),
+                );
+            }
+            Some(_) => {}
+        }
+        let message = match crate::protocol::endpoint::client_session_switch_message(
+            &session_name,
+            params.cwd.as_deref(),
+        ) {
+            Ok(message) => message,
+            Err(err) => return error(id, "internal_error", err.to_string()),
+        };
+        if !self.send_to_client(client_id, message) {
+            return error(
+                id,
+                "client_not_switchable",
+                format!("client {client_id} disconnected before the request was sent"),
+            );
+        }
+        info!(client_id, session = %session_name, "client session switch requested");
+        serde_json::to_string(&api::schema::SuccessResponse {
+            id,
+            result: ResponseResult::ClientSessionSwitch {
+                accepted: true,
+                reason: ClientSessionSwitchReason::Requested,
+                client_id: Some(client_id),
+                session: session_name,
+            },
+        })
+        .unwrap_or_else(|_| "{}".to_string())
+    }
+
     fn drain_client_config_reload_request(&mut self) {
         if !self.app.state.request_client_config_reload {
             return;
@@ -3017,6 +3111,12 @@ impl HeadlessServer {
             }
             api::schema::Method::ClientWindowTitleClear(_) => {
                 let response = self.handle_client_window_title_api(msg.request.id.clone(), None);
+                let _ = msg.respond_to.send(response);
+                return true;
+            }
+            api::schema::Method::ClientSessionSwitch(params) => {
+                let response =
+                    self.handle_client_session_switch_api(msg.request.id.clone(), params.clone());
                 let _ = msg.respond_to.send(response);
                 return true;
             }

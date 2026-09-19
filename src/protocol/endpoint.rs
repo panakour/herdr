@@ -29,6 +29,7 @@ pub const HEALTH_PING_KIND: &str = "endpoint.health.ping.v1";
 pub const HEALTH_PONG_KIND: &str = "endpoint.health.pong.v1";
 pub const AGENT_VIEW_PROJECTION_CAPABILITY: &str = "agent_view_projection";
 pub const AGENT_VIEW_PROJECTION_KIND: &str = "endpoint.agent-view.v1";
+pub const CLIENT_SESSION_SWITCH_KIND: &str = "endpoint.client.session-switch.v1";
 
 fn default_true() -> bool {
     true
@@ -92,6 +93,29 @@ pub struct EndpointServerWelcome {
     pub capabilities: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<EndpointHandshakeError>,
+}
+
+/// Optional named control asking one client-owned shell to reattach to another
+/// local session. Older clients ignore it like any unknown optional control.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EndpointClientSessionSwitch {
+    pub session: String,
+    /// Startup directory for a server the client has to start for `session`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+}
+
+pub fn client_session_switch_message(
+    session: &str,
+    cwd: Option<&str>,
+) -> serde_json::Result<ServerMessage> {
+    Ok(ServerMessage::EndpointControl {
+        kind: CLIENT_SESSION_SWITCH_KIND.into(),
+        data: serde_json::to_string(&EndpointClientSessionSwitch {
+            session: session.to_owned(),
+            cwd: cwd.map(str::to_owned),
+        })?,
+    })
 }
 
 pub fn snapshot_message(snapshot: &ClientShellSnapshot) -> serde_json::Result<ServerMessage> {

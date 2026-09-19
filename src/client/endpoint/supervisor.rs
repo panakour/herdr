@@ -103,6 +103,12 @@ impl EndpointSupervisors {
         self.endpoints.insert(ClientEndpointId::Local, state);
     }
 
+    pub(crate) fn reserve_generation(&mut self) -> u64 {
+        let generation = self.next_generation;
+        self.next_generation = self.next_generation.saturating_add(1);
+        generation
+    }
+
     pub(crate) fn reconcile_profiles(
         &mut self,
         profiles: &[super::SavedSshEndpoint],
@@ -286,7 +292,7 @@ fn connect_once(
             (connected.stream, Box::new(connected.bridge))
         }
     };
-    let handshake = super::super::do_handshake(
+    let handshake = super::super::handshake::do_handshake_with_timeout(
         &mut stream,
         options.cols,
         options.rows,
@@ -297,6 +303,11 @@ fn connect_once(
         options.endpoint_keybindings,
         options.mouse_capture,
         false,
+        if endpoint_id.is_local() {
+            super::super::handshake::LOCAL_HANDSHAKE_READ_TIMEOUT
+        } else {
+            super::super::handshake::REMOTE_HANDSHAKE_READ_TIMEOUT
+        },
     )
     .map_err(handshake_error)?;
     if handshake.encoding != RenderEncoding::SemanticFrame {
@@ -326,6 +337,20 @@ fn connect_once(
         writer,
         negotiation,
     })
+}
+
+/// Prepare an inactive Local connection without replacing its live registry entry.
+pub(crate) fn prepare_local_connection(
+    path: PathBuf,
+    options: EndpointConnectOptions,
+    generation: u64,
+) -> Result<EndpointSupervisorEvent, std::io::Error> {
+    connect_once(
+        &ConnectTarget::Local(path),
+        options,
+        ClientEndpointId::Local,
+        generation,
+    )
 }
 
 fn failure_needs_attention(error: &std::io::Error) -> bool {

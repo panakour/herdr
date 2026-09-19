@@ -1689,6 +1689,34 @@
           ],
           "type": "object"
         },
+        "ClientSessionSwitchParams": {
+          "description": "Asks one attached client to reattach to another local session in place.",
+          "properties": {
+            "client_id": {
+              "description": "Attached client to move. Defaults to the current foreground client.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "cwd": {
+              "description": "Directory for the first workspace when the target session's server is\nstarted by this switch. Ignored when the session already has workspaces.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "session": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "session"
+          ],
+          "type": "object"
+        },
         "ClientShellSurfaceSetParams": {
           "description": "Updates whether the requesting client shell receives and controls pane presentation.",
           "properties": {
@@ -3530,6 +3558,15 @@
                 "null"
               ]
             },
+            "client_id": {
+              "description": "Attached client that invoked the action through a keybinding.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
             "correlation_id": {
               "type": [
                 "string",
@@ -4931,6 +4968,22 @@
             },
             "params": {
               "$ref": "#/schemas/request/$defs/EmptyParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "client.session.switch",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/ClientSessionSwitchParams"
             }
           },
           "required": [
@@ -6846,6 +6899,13 @@
             "blocked",
             "done",
             "unknown"
+          ],
+          "type": "string"
+        },
+        "ClientSessionSwitchReason": {
+          "enum": [
+            "requested",
+            "no_foreground_client"
           ],
           "type": "string"
         },
@@ -8800,6 +8860,15 @@
                 "null"
               ]
             },
+            "client_id": {
+              "description": "Attached client that invoked the action through a keybinding.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
             "correlation_id": {
               "type": [
                 "string",
@@ -10175,6 +10244,38 @@
                 "type",
                 "changed",
                 "reason"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "accepted": {
+                  "type": "boolean"
+                },
+                "client_id": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "reason": {
+                  "$ref": "#/schemas/success_response/$defs/ClientSessionSwitchReason"
+                },
+                "session": {
+                  "type": "string"
+                },
+                "type": {
+                  "const": "client_session_switch",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "accepted",
+                "reason",
+                "session"
               ],
               "type": "object"
             },

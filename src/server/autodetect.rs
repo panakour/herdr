@@ -45,6 +45,72 @@ pub fn is_server_listening() -> bool {
     is_server_listening_at(&client_socket_path())
 }
 
+/// Prepare a target session without changing the caller's active session or
+/// socket overrides. Called on a blocking worker, never on the client event loop.
+pub fn prepare_session_server(session: Option<&str>, startup_cwd: Option<&Path>) -> io::Result<()> {
+    use crate::api::client::{ApiClient, ApiClientError, ConnectionTarget};
+
+    let api_path = crate::session::api_socket_path_for(session);
+    let socket_path = crate::session::client_socket_path_for(session);
+    let client = ApiClient::for_target(ConnectionTarget::SocketPath(api_path));
+    let mut spawned = false;
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while std::time::Instant::now() < deadline {
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        match client.status_with_timeout(remaining.min(STATUS_REQUEST_TIMEOUT)) {
+            Ok(_) => {
+                return wait_for_server_socket(
+                    &socket_path,
+                    deadline.saturating_duration_since(std::time::Instant::now()),
+                )
+            }
+            Err(ApiClientError::Io(error))
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused
+                ) =>
+            {
+                if !spawned {
+                    let mut command =
+                        build_server_daemon_command(std::env::current_exe()?, startup_cwd);
+                    command
+                        .arg("--session")
+                        .arg(crate::session::display_name(session))
+                        .env_remove(crate::api::SOCKET_PATH_ENV_VAR)
+                        .env_remove("HERDR_CLIENT_SOCKET_PATH");
+                    crate::platform::launch_server_daemon_command(&mut command)?;
+                    spawned = true;
+                }
+            }
+            // An existing server can be starting/replacing its API listener.
+            // Retry transport interruptions, but never spawn on a mere timeout.
+            Err(ApiClientError::Io(error))
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::TimedOut
+                        | io::ErrorKind::WouldBlock
+                        | io::ErrorKind::Interrupted
+                        | io::ErrorKind::ConnectionReset
+                        | io::ErrorKind::ConnectionAborted
+                        | io::ErrorKind::BrokenPipe
+                        | io::ErrorKind::UnexpectedEof
+                ) => {}
+            Err(ApiClientError::EmptyResponse) => {}
+            Err(error) => return Err(io::Error::other(error)),
+        }
+        std::thread::sleep(
+            SOCKET_POLL_INTERVAL.min(deadline.saturating_duration_since(std::time::Instant::now())),
+        );
+    }
+    Err(io::Error::new(
+        io::ErrorKind::TimedOut,
+        format!(
+            "session server did not become ready: {}",
+            socket_path.display()
+        ),
+    ))
+}
+
 /// Checks whether a herdr server is listening at a specific socket path.
 fn is_server_listening_at(socket_path: &Path) -> bool {
     #[cfg(windows)]
@@ -192,6 +258,12 @@ fn validate_running_server_compatibility(saved_federation: bool) -> io::Result<(
 ///
 /// Returns the PID of the spawned server process.
 pub fn spawn_server_daemon() -> io::Result<u32> {
+    spawn_server_daemon_with_startup_cwd(None)
+}
+
+/// Spawns the server daemon, seeding its first workspace from `startup_cwd`
+/// instead of this process's working directory.
+pub fn spawn_server_daemon_with_startup_cwd(startup_cwd: Option<&Path>) -> io::Result<u32> {
     let exe = std::env::current_exe().map_err(|err| {
         io::Error::new(
             err.kind(),
@@ -201,7 +273,7 @@ pub fn spawn_server_daemon() -> io::Result<u32> {
 
     info!(exe = %exe.display(), "spawning server daemon");
 
-    let mut command = build_server_daemon_command(exe);
+    let mut command = build_server_daemon_command(exe, startup_cwd);
 
     let pid =
         crate::platform::launch_server_daemon_command(&mut command).map_err(|err: io::Error| {
@@ -212,7 +284,7 @@ pub fn spawn_server_daemon() -> io::Result<u32> {
     Ok(pid)
 }
 
-fn build_server_daemon_command(exe: PathBuf) -> Command {
+fn build_server_daemon_command(exe: PathBuf, startup_cwd: Option<&Path>) -> Command {
     let mut command = Command::new(&exe);
     command
         .arg("server")
@@ -222,7 +294,11 @@ fn build_server_daemon_command(exe: PathBuf) -> Command {
         .stderr(std::process::Stdio::null());
     crate::platform::detach_server_daemon_command(&mut command);
 
-    match std::env::current_dir() {
+    let startup_cwd = match startup_cwd {
+        Some(cwd) => Ok(cwd.to_path_buf()),
+        None => std::env::current_dir(),
+    };
+    match startup_cwd {
         Ok(cwd) => {
             command.env(STARTUP_CWD_ENV_VAR, cwd);
         }
@@ -365,7 +441,7 @@ mod tests {
         ];
         crate::session::configure_from_args(&args).unwrap();
 
-        let command = build_server_daemon_command(PathBuf::from("/tmp/herdr-test"));
+        let command = build_server_daemon_command(PathBuf::from("/tmp/herdr-test"), None);
         let envs: Vec<_> = command.get_envs().collect();
 
         assert!(envs.iter().any(|(key, value)| {
@@ -383,11 +459,24 @@ mod tests {
     #[test]
     fn server_daemon_command_passes_current_dir_as_startup_cwd() {
         let expected = std::env::current_dir().unwrap();
-        let command = build_server_daemon_command(PathBuf::from("/tmp/herdr-test"));
+        let command = build_server_daemon_command(PathBuf::from("/tmp/herdr-test"), None);
         let envs: Vec<_> = command.get_envs().collect();
 
         assert!(envs.iter().any(|(key, value)| {
             *key == OsStr::new(STARTUP_CWD_ENV_VAR) && value == &Some(expected.as_os_str())
+        }));
+    }
+
+    #[test]
+    fn server_daemon_command_prefers_an_explicit_startup_cwd() {
+        let command = build_server_daemon_command(
+            PathBuf::from("/tmp/herdr-test"),
+            Some(Path::new("/srv/project")),
+        );
+        let envs: Vec<_> = command.get_envs().collect();
+
+        assert!(envs.iter().any(|(key, value)| {
+            *key == OsStr::new(STARTUP_CWD_ENV_VAR) && value == &Some(OsStr::new("/srv/project"))
         }));
     }
 

@@ -926,7 +926,9 @@ impl HeadlessServer {
         self.set_default_shell_target_from_client(client_id);
         let popup_before = self.app.state.popup_pane.is_some();
         let popup_owner = self.shell_tab_id_for_client(client_id);
+        self.app.request_client_id = Some(client_id);
         let changed = self.handle_api_request_with_shutdown_check_inner(msg, false);
+        self.app.request_client_id = None;
         self.focus_shell_client_on_default_target(client_id);
         if !popup_before && self.app.state.popup_pane.is_some() {
             self.popup_owner_tab_id = popup_owner;

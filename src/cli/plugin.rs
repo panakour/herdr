@@ -469,6 +469,7 @@ fn plugin_action_invoke(args: &[String]) -> std::io::Result<i32> {
             correlation_id: None,
             clicked_url: None,
             link_handler_id: None,
+            client_id: None,
         }),
     }))
 }

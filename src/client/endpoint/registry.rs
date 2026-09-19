@@ -288,6 +288,22 @@ impl EndpointRegistry {
         }
     }
 
+    /// Retire a connection without blocking input/rendering on its final socket write.
+    pub(crate) fn detach_in_background(&mut self, endpoint_id: &ClientEndpointId) {
+        self.failures
+            .retain(|failure| &failure.endpoint_id != endpoint_id);
+        if let Some(mut connection) = self.connections.remove(endpoint_id) {
+            tokio::task::spawn_blocking(move || {
+                if connection.transport.send(&ClientMessage::Detach).is_ok() {
+                    let _ = connection
+                        .transport
+                        .flush(Instant::now() + std::time::Duration::from_millis(250));
+                }
+                connection.transport.disconnect();
+            });
+        }
+    }
+
     pub(crate) fn disconnect(&mut self, endpoint_id: &ClientEndpointId) {
         self.failures
             .retain(|failure| &failure.endpoint_id != endpoint_id);

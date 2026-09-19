@@ -70,6 +70,9 @@ impl App {
         if let Some(pane_id) = context.focused_pane_id.as_ref() {
             env.push(("HERDR_PANE_ID".to_string(), pane_id.clone()));
         }
+        if let Some(client_id) = context.client_id {
+            env.push(("HERDR_CLIENT_ID".to_string(), client_id.to_string()));
+        }
         if let Some(clicked_url) = context.clicked_url.as_ref() {
             env.push(("HERDR_PLUGIN_CLICKED_URL".to_string(), clicked_url.clone()));
         }

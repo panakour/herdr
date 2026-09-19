@@ -10,6 +10,10 @@ pub(crate) enum EndpointControlMessage {
     HealthPong,
     AgentViewProjection(DecodedAgentViewProjection),
     Snapshot(Box<crate::protocol::ClientShellSnapshot>),
+    SessionSwitch {
+        session: String,
+        cwd: Option<String>,
+    },
     Ignored,
 }
 
@@ -47,6 +51,17 @@ pub(crate) fn decode_endpoint_control(
             },
         ));
     }
+    if kind == crate::protocol::endpoint::CLIENT_SESSION_SWITCH_KIND {
+        let Ok(request): Result<crate::protocol::endpoint::EndpointClientSessionSwitch, _> =
+            serde_json::from_str(data)
+        else {
+            return Ok(EndpointControlMessage::Ignored);
+        };
+        return Ok(EndpointControlMessage::SessionSwitch {
+            session: request.session,
+            cwd: request.cwd,
+        });
+    }
     if kind == crate::protocol::endpoint::ENDPOINT_SNAPSHOT_KIND {
         let snapshot = serde_json::from_str(data)
             .map_err(|error| format!("invalid endpoint snapshot: {error}"))?;
@@ -68,6 +83,29 @@ pub(crate) fn protocol_failure_is_fatal(endpoint_id: &ClientEndpointId) -> bool 
 mod tests {
     use super::*;
     use crate::client::endpoint::ProfileId;
+
+    #[test]
+    fn session_switch_control_decodes_the_target_session() {
+        let crate::protocol::ServerMessage::EndpointControl { kind, data } =
+            crate::protocol::endpoint::client_session_switch_message("work", Some("/srv/work"))
+                .unwrap()
+        else {
+            panic!("expected endpoint control");
+        };
+        assert!(matches!(
+            decode_endpoint_control(&kind, &data).unwrap(),
+            EndpointControlMessage::SessionSwitch { session, cwd }
+                if session == "work" && cwd.as_deref() == Some("/srv/work")
+        ));
+        assert!(matches!(
+            decode_endpoint_control(&kind, r#"{"session":"work"}"#).unwrap(),
+            EndpointControlMessage::SessionSwitch { session, cwd: None } if session == "work"
+        ));
+        assert!(matches!(
+            decode_endpoint_control(&kind, "not json").unwrap(),
+            EndpointControlMessage::Ignored
+        ));
+    }
 
     #[test]
     fn unknown_optional_controls_are_ignored() {

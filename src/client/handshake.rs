@@ -4,8 +4,6 @@ use std::io::IsTerminal as _;
 use std::time::Duration;
 
 use interprocess::local_socket::traits::Stream as _;
-#[cfg(windows)]
-use tracing::debug;
 use tracing::info;
 
 use crate::ipc::LocalStream;
@@ -90,33 +88,6 @@ fn direct_graphics_profile_allowed() -> bool {
     false
 }
 
-#[cfg(windows)]
-fn set_handshake_recv_timeout(
-    stream: &LocalStream,
-    timeout: Option<Duration>,
-    context: &'static str,
-) -> Result<(), ClientError> {
-    match stream.set_recv_timeout(timeout) {
-        Ok(()) => Ok(()),
-        Err(err) if err.kind() == io::ErrorKind::Unsupported => {
-            debug!(err = %err, context, "client socket receive timeout unavailable");
-            Ok(())
-        }
-        Err(err) => Err(ClientError::ConnectionFailed(err)),
-    }
-}
-
-#[cfg(not(windows))]
-fn set_handshake_recv_timeout(
-    stream: &LocalStream,
-    timeout: Option<Duration>,
-    _context: &'static str,
-) -> Result<(), ClientError> {
-    stream
-        .set_recv_timeout(timeout)
-        .map_err(ClientError::ConnectionFailed)
-}
-
 #[derive(Debug)]
 pub(super) struct HandshakeResult {
     pub(super) encoding: RenderEncoding,
@@ -163,6 +134,39 @@ pub(super) fn do_handshake(
     mouse_capture: bool,
     surface_active: bool,
 ) -> Result<HandshakeResult, ClientError> {
+    let read_timeout = if shell_surface_size.is_some() && !surface_active {
+        REMOTE_HANDSHAKE_READ_TIMEOUT
+    } else {
+        handshake_read_timeout()
+    };
+    do_handshake_with_timeout(
+        stream,
+        cols,
+        rows,
+        cell_width_px,
+        cell_height_px,
+        exact_cell_size,
+        shell_surface_size,
+        endpoint_keybindings,
+        mouse_capture,
+        surface_active,
+        read_timeout,
+    )
+}
+
+pub(super) fn do_handshake_with_timeout(
+    stream: &mut LocalStream,
+    cols: u16,
+    rows: u16,
+    cell_width_px: u32,
+    cell_height_px: u32,
+    exact_cell_size: bool,
+    shell_surface_size: Option<crate::protocol::ClientSurfaceSize>,
+    endpoint_keybindings: bool,
+    mouse_capture: bool,
+    surface_active: bool,
+    read_timeout: Duration,
+) -> Result<HandshakeResult, ClientError> {
     stream
         .set_nonblocking(false)
         .map_err(ClientError::ConnectionFailed)?;
@@ -208,22 +212,16 @@ pub(super) fn do_handshake(
     protocol::write_message(stream, &hello)
         .map_err(|e| ClientError::ConnectionFailed(io::Error::other(e.to_string())))?;
 
-    let read_timeout = if endpoint_shell && !surface_active {
-        REMOTE_HANDSHAKE_READ_TIMEOUT
-    } else {
-        handshake_read_timeout()
-    };
-    set_handshake_recv_timeout(
-        stream,
-        Some(read_timeout),
-        "client handshake read timeout unavailable",
-    )?;
-    let welcome: ServerMessage = protocol::read_message(stream, MAX_FRAME_SIZE)?;
-    set_handshake_recv_timeout(
-        stream,
-        None,
-        "failed to clear client handshake read timeout",
-    )?;
+    crate::ipc::set_local_stream_polling(stream, true).map_err(ClientError::ConnectionFailed)?;
+    let welcome = protocol::read_message::<_, ServerMessage>(
+        &mut crate::ipc::LocalStreamDeadlineReader {
+            stream,
+            deadline: std::time::Instant::now() + read_timeout,
+        },
+        MAX_FRAME_SIZE,
+    );
+    crate::ipc::set_local_stream_polling(stream, false).map_err(ClientError::ConnectionFailed)?;
+    let welcome = welcome?;
 
     if endpoint_shell {
         let ServerMessage::EndpointControl { kind, data } = welcome else {

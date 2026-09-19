@@ -375,6 +375,7 @@ impl App {
             correlation_id: Some(correlation_id.to_string()),
             clicked_url: None,
             link_handler_id: None,
+            client_id: None,
         }
     }
 
@@ -406,5 +407,6 @@ fn empty_plugin_context(correlation_id: &str) -> PluginInvocationContext {
         correlation_id: Some(correlation_id.to_string()),
         clicked_url: None,
         link_handler_id: None,
+        client_id: None,
     }
 }
