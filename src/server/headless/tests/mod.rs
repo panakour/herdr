@@ -419,7 +419,7 @@ fn client_session_switch_targets_one_shell_client() {
     // An explicit client id moves only that client.
     let response = client_session_switch(&mut server, "work", Some(2));
     assert_eq!(response["result"]["type"], "client_session_switch");
-    assert_eq!(response["result"]["switched"], true);
+    assert_eq!(response["result"]["accepted"], true);
     assert_eq!(response["result"]["reason"], "requested");
     assert_eq!(response["result"]["client_id"], 2);
     assert_eq!(response["result"]["session"], "work");
@@ -460,7 +460,7 @@ fn client_session_switch_targets_one_shell_client() {
 fn client_session_switch_without_clients_reports_no_foreground_client() {
     let mut server = test_headless_server();
     let response = client_session_switch(&mut server, "work", None);
-    assert_eq!(response["result"]["switched"], false);
+    assert_eq!(response["result"]["accepted"], false);
     assert_eq!(response["result"]["reason"], "no_foreground_client");
     shutdown_test_runtimes(&mut server);
 }

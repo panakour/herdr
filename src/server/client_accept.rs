@@ -72,62 +72,8 @@ pub(crate) fn reject_pending_client_connections(listener: &LocalListener) -> io:
     Ok(())
 }
 
-/// Wakes the headless loop as soon as a client connection is waiting on the
-/// non-blocking listener, instead of leaving it to the idle poll interval.
-///
-/// The loop re-arms the watcher after each accept pass with the listener it is
-/// currently using, so a listener rebuilt after a failed handoff is picked up on
-/// the next pass and a stale descriptor only produces one harmless extra wake.
 #[cfg(unix)]
-pub(crate) struct ClientAcceptWaker {
-    rearm_tx: std::sync::mpsc::SyncSender<std::os::fd::RawFd>,
-}
-
-#[cfg(unix)]
-impl ClientAcceptWaker {
-    pub(crate) fn spawn(notify: Arc<tokio::sync::Notify>) -> Self {
-        let (rearm_tx, rearm_rx) = std::sync::mpsc::sync_channel::<std::os::fd::RawFd>(1);
-        let spawned = std::thread::Builder::new()
-            .name("client-accept-waker".into())
-            .spawn(move || {
-                while let Ok(fd) = rearm_rx.recv() {
-                    wait_until_readable(fd);
-                    notify.notify_one();
-                }
-            });
-        if let Err(err) = spawned {
-            warn!(err = %err, "client accept waker unavailable; falling back to polling");
-        }
-        Self { rearm_tx }
-    }
-
-    /// Watches `listener` for the next pending connection. At most one request
-    /// is queued; the loop calls this after every accept pass.
-    pub(crate) fn rearm(&self, listener: &LocalListener) {
-        use std::os::fd::{AsFd as _, AsRawFd as _};
-
-        let interprocess::local_socket::Listener::UdSocket(inner) = listener;
-        let _ = self.rearm_tx.try_send(inner.as_fd().as_raw_fd());
-    }
-}
-
-#[cfg(unix)]
-fn wait_until_readable(fd: std::os::fd::RawFd) {
-    loop {
-        let mut pollfd = libc::pollfd {
-            fd,
-            events: libc::POLLIN,
-            revents: 0,
-        };
-        // SAFETY: `pollfd` is a valid, exclusively borrowed array of one entry.
-        let ready = unsafe { libc::poll(&mut pollfd, 1, -1) };
-        if ready < 0 && io::Error::last_os_error().kind() == io::ErrorKind::Interrupted {
-            continue;
-        }
-        // A readable, closed, or invalid descriptor all mean the loop should look.
-        return;
-    }
-}
+pub(crate) use crate::platform::ClientAcceptWaker;
 
 #[cfg(all(test, unix))]
 mod tests {
@@ -167,5 +113,41 @@ mod tests {
 
         drop(listener);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn waker_replaces_an_idle_listener_and_stops_without_a_connection() {
+        let dir = std::env::temp_dir().join(format!("herdr-waker-replace-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let old = crate::ipc::bind_local_listener(&dir.join("old.sock")).unwrap();
+        let new_path = dir.join("new.sock");
+        let new = crate::ipc::bind_local_listener(&new_path).unwrap();
+        let notify = Arc::new(tokio::sync::Notify::new());
+        let waker = ClientAcceptWaker::spawn(notify.clone());
+        waker.rearm(&old);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), notify.notified())
+                .await
+                .is_err()
+        );
+        waker.rearm(&new);
+        drop(old);
+        let _client = crate::ipc::connect_local_stream(&new_path).unwrap();
+        tokio::time::timeout(Duration::from_secs(2), notify.notified())
+            .await
+            .unwrap();
+        assert!(new.accept().is_ok());
+        waker.rearm(&new);
+        drop(new);
+        let (done_tx, done_rx) = tokio::sync::oneshot::channel();
+        std::thread::spawn(move || {
+            drop(waker);
+            let _ = done_tx.send(());
+        });
+        tokio::time::timeout(Duration::from_secs(2), done_rx)
+            .await
+            .unwrap()
+            .unwrap();
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

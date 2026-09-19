@@ -10249,6 +10249,9 @@
             },
             {
               "properties": {
+                "accepted": {
+                  "type": "boolean"
+                },
                 "client_id": {
                   "format": "uint64",
                   "minimum": 0,
@@ -10263,9 +10266,6 @@
                 "session": {
                   "type": "string"
                 },
-                "switched": {
-                  "type": "boolean"
-                },
                 "type": {
                   "const": "client_session_switch",
                   "type": "string"
@@ -10273,7 +10273,7 @@
               },
               "required": [
                 "type",
-                "switched",
+                "accepted",
                 "reason",
                 "session"
               ],

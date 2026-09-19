@@ -585,6 +585,8 @@ async fn run_client_loop(
     let mut next_surface_serial = 1_u64;
     let mut pending_activation: Option<endpoint::PendingEndpointActivation> = None;
     let mut scheduled_activation = None;
+    let mut session_switch_pending = false;
+    let mut queued_session_switch = None;
     let mut pending_catalog: Option<Result<Vec<endpoint::SavedSshEndpoint>, String>> = None;
     if state.shell.is_some() && !is_remote_client && state.attach_escape.is_none() {
         catalog_reload::watch_profiles(event_tx.clone(), should_quit.clone());
@@ -711,7 +713,13 @@ async fn run_client_loop(
                 shell.timer_delay(std::time::Instant::now())
             });
         let timer_deadline = client_timer.deadline(std::time::Instant::now(), timer_delay);
-        let immediate_event = scheduled_activation.take();
+        let immediate_event = if pending_activation.is_none() {
+            queued_session_switch
+                .take()
+                .or_else(|| scheduled_activation.take())
+        } else {
+            scheduled_activation.take()
+        };
         #[cfg(windows)]
         let event = if let Some(event) = immediate_event {
             event
@@ -745,7 +753,89 @@ async fn run_client_loop(
             shell.tick_popup_pending(now);
         }
 
+        let event = if let ClientLoopEvent::SessionSwitchPrepared(prepared) = event {
+            session_switch_pending = false;
+            let session_switch::PreparedSwitch {
+                session,
+                source_generation,
+                generation,
+                result,
+            } = *prepared;
+            let result = result.and_then(|connected| {
+                let local_was_active = session_switch::commit(
+                    &mut state,
+                    &mut write_stream,
+                    &mut endpoint_commands,
+                    &mut supervisors,
+                    &mut pending_activation,
+                    &session,
+                    source_generation,
+                    generation,
+                )?;
+                Ok((connected, local_was_active))
+            });
+            match result {
+                Ok((connected, local_was_active)) => {
+                    federated = true;
+                    if local_was_active {
+                        scheduled_activation = None;
+                        clear_endpoint_host_effects(
+                            &mut state,
+                            &host_mouse_capture_active,
+                            &host_sgr_pixels_active,
+                        );
+                    }
+                    ClientLoopEvent::EndpointSupervisor(connected)
+                }
+                Err(message) => {
+                    warn!(%message, %session, "session switch failed; keeping current session");
+                    if let Some(shell) = state.shell.as_mut() {
+                        shell.receive_endpoint_unavailable(format!(
+                            "cannot switch to session {session}: {message}"
+                        ));
+                    }
+                    if let Some(frame) = state.shell.as_mut().and_then(|shell| {
+                        shell.compose(state.reported_size.0, state.reported_size.1)
+                    }) {
+                        state.present_frame(frame);
+                    }
+                    ClientLoopEvent::Timer
+                }
+            }
+        } else {
+            event
+        };
         match event {
+            ClientLoopEvent::SessionSwitchPrepared(_) => unreachable!("handled before dispatch"),
+            ClientLoopEvent::PrepareSessionSwitch {
+                session,
+                cwd,
+                generation,
+            } => {
+                if let Some(shell) = state.shell.as_ref() {
+                    let options = endpoint::EndpointConnectOptions {
+                        cols: state.reported_size.0,
+                        rows: state.reported_size.1,
+                        cell_width_px: state.reported_cell_size.0,
+                        cell_height_px: state.reported_cell_size.1,
+                        pixel_geometry_exact: state.pixel_geometry_exact,
+                        surface_size: shell
+                            .surface_size(state.reported_size.0, state.reported_size.1),
+                        endpoint_keybindings: config.endpoint_keybindings,
+                        mouse_capture: state.shell_mouse_capture_preference,
+                    };
+                    session_switch::prepare(
+                        session,
+                        cwd,
+                        generation,
+                        supervisors.reserve_generation(),
+                        options,
+                        event_tx.clone(),
+                    );
+                } else {
+                    session_switch_pending = false;
+                }
+            }
             ClientLoopEvent::EndpointCatalog(reload) => pending_catalog = Some(reload),
             #[cfg(unix)]
             ClientLoopEvent::StdinInput(data) => {
@@ -1912,39 +2002,24 @@ async fn run_client_loop(
                                 session,
                                 cwd,
                             }) => {
-                                match session_switch::begin_local_session_switch(
-                                    &mut state,
-                                    &mut write_stream,
-                                    &mut endpoint_commands,
-                                    &mut supervisors,
-                                    &mut pending_activation,
-                                    &endpoint_id,
-                                    generation,
-                                    &session,
-                                    cwd.as_deref(),
-                                    now,
-                                ) {
-                                    Ok(label) => {
-                                        info!(session = %label, "switching to another session");
-                                        // Local recovery stays enabled so the new session's
-                                        // server can be reached like a replaced Local server.
-                                        federated = true;
-                                        scheduled_activation = None;
-                                        clear_endpoint_host_effects(
-                                            &mut state,
-                                            &host_mouse_capture_active,
-                                            &host_sgr_pixels_active,
-                                        );
+                                if !endpoint_id.is_local()
+                                    || is_remote_client
+                                    || session_switch_pending
+                                {
+                                    if let Some(shell) = state.shell.as_mut() {
+                                        shell.receive_endpoint_unavailable("session switch unavailable or another switch is in progress".into());
                                     }
-                                    Err(message) => {
-                                        warn!(%message, %session, "ignoring session switch request");
-                                        if let Some(shell) = state.shell.as_mut() {
-                                            shell.receive_endpoint_unavailable(format!(
-                                                "cannot switch to session {session}: {message}"
-                                            ));
-                                        }
-                                    }
+                                    continue;
                                 }
+                                session_switch_pending = true;
+                                // Queue the request, not an unmonitored prepared connection,
+                                // while an endpoint activation is still finishing.
+                                queued_session_switch =
+                                    Some(ClientLoopEvent::PrepareSessionSwitch {
+                                        session,
+                                        cwd,
+                                        generation,
+                                    });
                                 continue;
                             }
                             Ok(endpoint::EndpointControlMessage::Snapshot(snapshot)) => snapshot,

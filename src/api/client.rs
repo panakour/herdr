@@ -1,5 +1,5 @@
 use std::fmt;
-use std::io::{self, BufRead, BufReader, Read, Write};
+use std::io::{self, BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -98,7 +98,7 @@ impl ApiClient {
                 let mut stream = self.connect()?;
                 write_request(&mut stream, &request)?;
                 crate::ipc::set_local_stream_polling(&mut stream, true)?;
-                let mut reader = BufReader::new(DeadlineReader {
+                let mut reader = BufReader::new(crate::ipc::LocalStreamDeadlineReader {
                     stream: &mut stream,
                     deadline: Instant::now() + timeout,
                 });
@@ -187,36 +187,6 @@ fn write_request(stream: &mut LocalStream, request: &Request) -> Result<(), ApiC
     stream.write_all(b"\n")?;
     stream.flush()?;
     Ok(())
-}
-
-struct DeadlineReader<'a> {
-    stream: &'a mut LocalStream,
-    deadline: Instant,
-}
-
-impl Read for DeadlineReader<'_> {
-    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
-        if buffer.is_empty() {
-            return Ok(0);
-        }
-        loop {
-            if Instant::now() >= self.deadline {
-                return Err(io::Error::new(
-                    io::ErrorKind::TimedOut,
-                    "server status probe timed out",
-                ));
-            }
-            // Windows named pipes have no read timeout; peek-before-read keeps
-            // both idle and partial responses subject to the same deadline.
-            match crate::ipc::poll_local_stream_read_count(self.stream, buffer)? {
-                crate::ipc::LocalStreamReadCount::Data(count) => return Ok(count),
-                crate::ipc::LocalStreamReadCount::Closed => return Ok(0),
-                crate::ipc::LocalStreamReadCount::Pending => {
-                    std::thread::sleep(Duration::from_millis(2))
-                }
-            }
-        }
-    }
 }
 
 fn read_json_line<T: DeserializeOwned>(reader: &mut impl BufRead) -> Result<T, ApiClientError> {

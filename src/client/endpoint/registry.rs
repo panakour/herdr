@@ -288,16 +288,20 @@ impl EndpointRegistry {
         }
     }
 
-    /// Waits until frames queued for `endpoint_id` before this call reach the socket.
-    pub(crate) fn flush_to(
-        &mut self,
-        endpoint_id: &ClientEndpointId,
-        deadline: Instant,
-    ) -> io::Result<()> {
-        let connection = self.connections.get_mut(endpoint_id).ok_or_else(|| {
-            io::Error::new(io::ErrorKind::NotConnected, "endpoint is unavailable")
-        })?;
-        connection.transport.flush(deadline)
+    /// Retire a connection without blocking input/rendering on its final socket write.
+    pub(crate) fn detach_in_background(&mut self, endpoint_id: &ClientEndpointId) {
+        self.failures
+            .retain(|failure| &failure.endpoint_id != endpoint_id);
+        if let Some(mut connection) = self.connections.remove(endpoint_id) {
+            tokio::task::spawn_blocking(move || {
+                if connection.transport.send(&ClientMessage::Detach).is_ok() {
+                    let _ = connection
+                        .transport
+                        .flush(Instant::now() + std::time::Duration::from_millis(250));
+                }
+                connection.transport.disconnect();
+            });
+        }
     }
 
     pub(crate) fn disconnect(&mut self, endpoint_id: &ClientEndpointId) {

@@ -402,7 +402,7 @@ fn client_session_switch_request_and_response_round_trip() {
     let response = SuccessResponse {
         id: "req_switch".into(),
         result: ResponseResult::ClientSessionSwitch {
-            switched: true,
+            accepted: true,
             reason: ClientSessionSwitchReason::Requested,
             client_id: Some(3),
             session: "work".into(),

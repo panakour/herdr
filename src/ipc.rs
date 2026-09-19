@@ -10,6 +10,36 @@ use interprocess::local_socket::traits::Stream as _;
 pub(crate) type LocalListener = interprocess::local_socket::Listener;
 pub(crate) type LocalStream = interprocess::local_socket::Stream;
 
+/// Absolute read deadline, including partial responses, on Unix sockets and
+/// Windows named pipes (which do not support socket receive timeouts).
+pub(crate) struct LocalStreamDeadlineReader<'a> {
+    pub(crate) stream: &'a mut LocalStream,
+    pub(crate) deadline: std::time::Instant,
+}
+
+impl Read for LocalStreamDeadlineReader<'_> {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        if buffer.is_empty() {
+            return Ok(0);
+        }
+        loop {
+            if std::time::Instant::now() >= self.deadline {
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "local stream read timed out",
+                ));
+            }
+            match poll_local_stream_read_count(self.stream, buffer)? {
+                LocalStreamReadCount::Data(count) => return Ok(count),
+                LocalStreamReadCount::Closed => return Ok(0),
+                LocalStreamReadCount::Pending => {
+                    std::thread::sleep(std::time::Duration::from_millis(2))
+                }
+            }
+        }
+    }
+}
+
 pub(crate) enum LocalStreamRead {
     Data,
     Pending,

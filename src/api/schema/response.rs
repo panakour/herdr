@@ -230,7 +230,7 @@ pub enum ResponseResult {
         reason: ClientWindowTitleReason,
     },
     ClientSessionSwitch {
-        switched: bool,
+        accepted: bool,
         reason: ClientSessionSwitchReason,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         client_id: Option<u64>,

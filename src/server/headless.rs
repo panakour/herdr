@@ -1666,7 +1666,7 @@ impl HeadlessServer {
             return serde_json::to_string(&api::schema::SuccessResponse {
                 id,
                 result: ResponseResult::ClientSessionSwitch {
-                    switched: false,
+                    accepted: false,
                     reason: ClientSessionSwitchReason::NoForegroundClient,
                     client_id: None,
                     session: session_name,
@@ -1716,7 +1716,7 @@ impl HeadlessServer {
         serde_json::to_string(&api::schema::SuccessResponse {
             id,
             result: ResponseResult::ClientSessionSwitch {
-                switched: true,
+                accepted: true,
                 reason: ClientSessionSwitchReason::Requested,
                 client_id: Some(client_id),
                 session: session_name,

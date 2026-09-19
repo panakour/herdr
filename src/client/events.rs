@@ -22,6 +22,12 @@ pub(super) enum ClientLoopEvent {
         generation: u64,
     },
     EndpointSupervisor(endpoint::EndpointSupervisorEvent),
+    SessionSwitchPrepared(Box<session_switch::PreparedSwitch>),
+    PrepareSessionSwitch {
+        session: String,
+        cwd: Option<String>,
+        generation: u64,
+    },
     EndpointCatalog(Result<Vec<endpoint::SavedSshEndpoint>, String>),
     ActivateEndpoint {
         endpoint_id: endpoint::ClientEndpointId,

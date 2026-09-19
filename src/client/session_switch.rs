@@ -1,90 +1,100 @@
 use super::*;
 
-const DETACH_FLUSH_TIMEOUT: Duration = Duration::from_millis(250);
-/// A fresh server accepts clients within tens of milliseconds. Waiting here keeps
-/// the first reconnect attempt from missing it and falling into retry backoff.
-const STARTED_SERVER_READY_TIMEOUT: Duration = Duration::from_secs(5);
+/// Preparation owns no live endpoint state. Failed or stale preparations simply
+/// drop their inactive connection, leaving the source session usable.
+pub(super) struct PreparedSwitch {
+    pub session: String,
+    pub source_generation: u64,
+    pub generation: u64,
+    pub result: Result<endpoint::EndpointSupervisorEvent, String>,
+}
 
-/// Moves this client-owned shell from the current Local session to `session`.
-///
-/// The old server only asked; the client owns the reconnect. Local keeps its
-/// endpoint identity, so the existing reconnect and activation path brings the
-/// new session's snapshot and surface up exactly like a replaced Local server.
+pub(super) fn prepare(
+    session: String,
+    cwd: Option<String>,
+    source_generation: u64,
+    generation: u64,
+    options: endpoint::EndpointConnectOptions,
+    event_tx: tokio::sync::mpsc::Sender<ClientLoopEvent>,
+) {
+    tokio::spawn(async move {
+        let target_session = session.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            let target = crate::session::parse_target_name(&target_session)?;
+            let cwd = cwd
+                .map(|cwd| {
+                    let path = crate::worktree::expand_tilde_path(&cwd);
+                    let path = std::fs::canonicalize(path).map_err(|error| error.to_string())?;
+                    if !path.is_dir() {
+                        return Err(format!("{} is not a directory", path.display()));
+                    }
+                    Ok(path)
+                })
+                .transpose()?;
+            crate::server::autodetect::prepare_session_server(target.as_deref(), cwd.as_deref())
+                .map_err(|error| error.to_string())?;
+            endpoint::prepare_local_connection(
+                crate::session::client_socket_path_for(target.as_deref()),
+                options,
+                generation,
+            )
+            .map_err(|error| error.to_string())
+        })
+        .await
+        .unwrap_or_else(|error| Err(format!("session preparation task failed: {error}")));
+        let _ = event_tx
+            .send(ClientLoopEvent::SessionSwitchPrepared(Box::new(
+                PreparedSwitch {
+                    session,
+                    source_generation,
+                    generation,
+                    result,
+                },
+            )))
+            .await;
+    });
+}
+
+/// Commit only after the target has accepted an inactive shell handshake.
+// These arguments are the existing client-loop state holders; the transaction
+// deliberately does not introduce a second owner for them.
 #[allow(clippy::too_many_arguments)]
-pub(super) fn begin_local_session_switch(
+pub(super) fn commit(
     state: &mut ClientState,
     endpoints: &mut endpoint::EndpointRegistry,
     endpoint_commands: &mut endpoint_commands::EndpointCommands,
     supervisors: &mut endpoint::EndpointSupervisors,
     pending_activation: &mut Option<endpoint::PendingEndpointActivation>,
-    endpoint_id: &endpoint::ClientEndpointId,
-    generation: u64,
     session: &str,
-    startup_cwd: Option<&str>,
-    now: std::time::Instant,
-) -> Result<String, String> {
-    if !endpoint_id.is_local() {
-        return Err("only the Local endpoint can switch sessions".into());
-    }
-    if state.shell.is_none() {
-        return Err("direct terminal attaches cannot switch sessions".into());
-    }
-    if handshake::is_remote_client_process() {
-        return Err("remote clients cannot switch local sessions".into());
+    source_generation: u64,
+    generation: u64,
+) -> Result<bool, String> {
+    let endpoint_id = endpoint::ClientEndpointId::Local;
+    if !endpoints.accepts(&endpoint_id, source_generation) || pending_activation.is_some() {
+        return Err("source connection changed while preparing the session; try again".into());
     }
     let target = crate::session::switch_active_session(session)?;
-    let label = crate::session::display_name(target.as_deref()).to_owned();
-    let socket_path = client_socket_path();
-    let startup_cwd = startup_cwd
-        .map(crate::worktree::expand_tilde_path)
-        .filter(|path| path.is_dir());
-    match crate::server::autodetect::spawn_server_daemon_if_needed(
-        &socket_path,
-        startup_cwd.as_deref(),
-    ) {
-        Ok(true) => {
-            info!(session = %label, "started server for requested session");
-            if let Err(error) = crate::server::autodetect::wait_for_server_socket(
-                &socket_path,
-                STARTED_SERVER_READY_TIMEOUT,
-            ) {
-                warn!(%error, session = %label, "started server is not ready yet; reconnecting");
-            }
-        }
-        Ok(false) => {}
-        Err(error) => {
-            warn!(%error, session = %label, "failed to start server for requested session")
-        }
-    }
-
-    // Leave the old server as a clean detach, then repoint Local at the new socket.
-    if matches!(
-        endpoints.send_to(endpoint_id, &ClientMessage::Detach),
-        endpoint::EndpointSendOutcome::Sent
-    ) {
-        let _ = endpoints.flush_to(endpoint_id, now + DETACH_FLUSH_TIMEOUT);
-    }
-    handle_endpoint_disconnect(
+    let now = std::time::Instant::now();
+    endpoints.detach_in_background(&endpoint_id);
+    let local_was_active = handle_endpoint_disconnect(
         state,
         endpoints,
         endpoint_commands,
         supervisors,
         pending_activation,
-        endpoint_id,
-        generation,
+        &endpoint_id,
+        source_generation,
         now,
-        &format!("is switching to session {label}"),
+        &format!("is switching to session {session}"),
     );
-    endpoints.disconnect(endpoint_id);
-    supervisors.add_local(socket_path, None, now);
+    supervisors.add_local(
+        crate::session::client_socket_path_for(target.as_deref()),
+        Some(generation),
+        now,
+    );
     if let Some(shell) = state.shell.as_mut() {
-        let endpoint_label = if target.is_some() {
-            label.clone()
-        } else {
-            "Local".into()
-        };
-        shell.set_local_endpoint_label(endpoint_label);
-        shell.set_endpoint_status(endpoint_id, endpoint::ClientEndpointStatus::Connecting);
+        shell.set_local_endpoint_label(target.unwrap_or_else(|| "Local".into()));
+        shell.set_endpoint_status(&endpoint_id, endpoint::ClientEndpointStatus::Connecting);
     }
-    Ok(label)
+    Ok(local_was_active)
 }

@@ -45,16 +45,70 @@ pub fn is_server_listening() -> bool {
     is_server_listening_at(&client_socket_path())
 }
 
-/// Starts a background server for `socket_path` when nothing is listening there.
-/// Returns whether a daemon was spawned; readiness is left to the caller.
-pub fn spawn_server_daemon_if_needed(
-    socket_path: &Path,
-    startup_cwd: Option<&Path>,
-) -> io::Result<bool> {
-    if is_server_listening_at(socket_path) {
-        return Ok(false);
+/// Prepare a target session without changing the caller's active session or
+/// socket overrides. Called on a blocking worker, never on the client event loop.
+pub fn prepare_session_server(session: Option<&str>, startup_cwd: Option<&Path>) -> io::Result<()> {
+    use crate::api::client::{ApiClient, ApiClientError, ConnectionTarget};
+
+    let api_path = crate::session::api_socket_path_for(session);
+    let socket_path = crate::session::client_socket_path_for(session);
+    let client = ApiClient::for_target(ConnectionTarget::SocketPath(api_path));
+    let mut spawned = false;
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while std::time::Instant::now() < deadline {
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        match client.status_with_timeout(remaining.min(STATUS_REQUEST_TIMEOUT)) {
+            Ok(_) => {
+                return wait_for_server_socket(
+                    &socket_path,
+                    deadline.saturating_duration_since(std::time::Instant::now()),
+                )
+            }
+            Err(ApiClientError::Io(error))
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused
+                ) =>
+            {
+                if !spawned {
+                    let mut command =
+                        build_server_daemon_command(std::env::current_exe()?, startup_cwd);
+                    command
+                        .arg("--session")
+                        .arg(crate::session::display_name(session))
+                        .env_remove(crate::api::SOCKET_PATH_ENV_VAR)
+                        .env_remove("HERDR_CLIENT_SOCKET_PATH");
+                    crate::platform::launch_server_daemon_command(&mut command)?;
+                    spawned = true;
+                }
+            }
+            // An existing server can be starting/replacing its API listener.
+            // Retry transport interruptions, but never spawn on a mere timeout.
+            Err(ApiClientError::Io(error))
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::TimedOut
+                        | io::ErrorKind::WouldBlock
+                        | io::ErrorKind::Interrupted
+                        | io::ErrorKind::ConnectionReset
+                        | io::ErrorKind::ConnectionAborted
+                        | io::ErrorKind::BrokenPipe
+                        | io::ErrorKind::UnexpectedEof
+                ) => {}
+            Err(ApiClientError::EmptyResponse) => {}
+            Err(error) => return Err(io::Error::other(error)),
+        }
+        std::thread::sleep(
+            SOCKET_POLL_INTERVAL.min(deadline.saturating_duration_since(std::time::Instant::now())),
+        );
     }
-    spawn_server_daemon_with_startup_cwd(startup_cwd).map(|_| true)
+    Err(io::Error::new(
+        io::ErrorKind::TimedOut,
+        format!(
+            "session server did not become ready: {}",
+            socket_path.display()
+        ),
+    ))
 }
 
 /// Checks whether a herdr server is listening at a specific socket path.

@@ -1008,7 +1008,7 @@ impl App {
                 return responses::encode_success(
                     request.id,
                     ResponseResult::ClientSessionSwitch {
-                        switched: false,
+                        accepted: false,
                         reason: crate::api::schema::ClientSessionSwitchReason::NoForegroundClient,
                         client_id: None,
                         session: params.session,
